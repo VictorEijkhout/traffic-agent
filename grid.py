@@ -21,11 +21,17 @@ class StreetGrid:
         height: int,
         street_rows: Optional[Iterable[int]] = None,
         street_cols: Optional[Iterable[int]] = None,
+        artery_row: Optional[int] = None,
+        artery_col: Optional[int] = None,
     ):
         """
         width, height: size of the grid (x in [0, width-1], y in [0, height-1])
         street_rows: which y-values are horizontal streets (default: every row)
         street_cols: which x-values are vertical streets (default: every col)
+        artery_row: the single street row designated as a major artery
+            (default: an existing street row nearest the middle)
+        artery_col: the single street column designated as a major artery
+            (default: an existing street column nearest the middle)
         """
         if width < 1 or height < 1:
             raise ValueError("width and height must be positive")
@@ -50,6 +56,27 @@ class StreetGrid:
         if not self.street_rows and not self.street_cols:
             raise ValueError("grid needs at least one street row or column")
 
+        self.artery_row: Optional[int] = self._pick_artery(
+            artery_row, self.street_rows, height, "street row"
+        )
+        self.artery_col: Optional[int] = self._pick_artery(
+            artery_col, self.street_cols, width, "street col"
+        )
+
+    @staticmethod
+    def _pick_artery(
+        requested: Optional[int], candidates: Set[int], span: int, label: str
+    ) -> Optional[int]:
+        """Validate an explicitly-requested artery line, or auto-pick the
+        existing street line closest to the middle of the grid."""
+        if requested is not None:
+            if requested not in candidates:
+                raise ValueError(f"artery {label} {requested} is not a street")
+            return requested
+        if not candidates:
+            return None
+        return min(candidates, key=lambda v: abs(v - span // 2))
+
     # -- geometry helpers ---------------------------------------------
 
     @staticmethod
@@ -69,6 +96,24 @@ class StreetGrid:
     def is_intersection(self, x: float, y: float) -> bool:
         """True if (x, y) is where a street row and street column cross."""
         return self.is_on_row_street(y) and self.is_on_col_street(x)
+
+    def is_on_artery_row(self, y: float) -> bool:
+        return self.artery_row is not None and self._is_int(y) and int(round(y)) == self.artery_row
+
+    def is_on_artery_col(self, x: float) -> bool:
+        return self.artery_col is not None and self._is_int(x) and int(round(x)) == self.artery_col
+
+    def is_artery_travel(self, x: float, y: float, direction: Tuple[int, int]) -> bool:
+        """
+        True if moving in `direction` while at (x, y) counts as traveling
+        along a major artery: horizontal motion on the artery row, or
+        vertical motion on the artery column.
+        """
+        dx, _dy = direction
+        if dx != 0:
+            return self.is_on_artery_row(y)
+        else:
+            return self.is_on_artery_col(x)
 
     def directions_at(self, x: float, y: float) -> List[Tuple[int, int]]:
         """
@@ -93,10 +138,13 @@ class StreetGrid:
         """Background character for an empty grid cell (no car on it)."""
         on_row = y in self.street_rows
         on_col = x in self.street_cols
+        artery_row = y == self.artery_row
+        artery_col = x == self.artery_col
         if on_row and on_col:
             return "+"
         if on_row:
-            return "-"
+            return "=" if artery_row else "-"
         if on_col:
-            return "|"
+            return "I" if artery_col else "|"
         return "."
+
